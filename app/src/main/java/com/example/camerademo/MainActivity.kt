@@ -1,20 +1,67 @@
 package com.example.camerademo
 
 import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.lifecycle.awaitInstance
+import androidx.lifecycle.lifecycleScope
+import com.example.camerademo.databinding.ActivityMainBinding
+import com.example.camerademo.usecase.ImageAnalysisUseCase
+import com.example.camerademo.usecase.ImageCaptureUseCase
+import com.example.camerademo.usecase.PreviewUseCase
+import com.example.camerademo.usecase.VideoCaptureUseCase
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private val permission = AppPermissions(this) { setup() }
+    private val overlay by lazy { CameraXOverlay(this) }
+    private var isRecording = false
+    private val preview = PreviewUseCase()
+    private val analysis = ImageAnalysisUseCase()
+    private val videoCapture = VideoCaptureUseCase()
+    private val imageCapture = ImageCaptureUseCase()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        permission.run()
+    }
+
+    private fun setup() = lifecycleScope.launch {
+        preview.bind(binding.previewView.surfaceProvider)
+        analysis.bind {
+            binding.analyzer.post {
+                binding.analyzer.setImageBitmap(it)
+            }
         }
+
+        binding.photo.setOnClickListener { takePhoto() }
+        binding.video.setOnClickListener { if (!isRecording) takeVideo() }
+        val instance = ProcessCameraProvider.awaitInstance(this@MainActivity)
+        val useCaseGroup = UseCaseGroup.Builder()
+            .addUseCase(preview.useCase)
+            .addUseCase(videoCapture.useCase)
+            .addUseCase(analysis.useCase)
+            .addUseCase(imageCapture.useCase)
+            .addEffect(overlay.getOverlay())
+            .build()
+        instance.bindToLifecycle(
+            this@MainActivity,
+            CameraSelector.DEFAULT_FRONT_CAMERA,
+            useCaseGroup,
+        )
+    }
+
+    private fun takeVideo() {
+        videoCapture.start(this)
+    }
+
+    private fun takePhoto() {
+        imageCapture.start(this)
     }
 }
